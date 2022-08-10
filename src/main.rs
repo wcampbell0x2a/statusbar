@@ -1,11 +1,11 @@
-use std::fmt::Write;
-use std::time::Duration;
-use std::sync::Mutex;
-use mpd::Client;
 use chrono::{DateTime, Local};
+use mpd::Client;
+use std::fmt::Write;
+use std::sync::Mutex;
+use std::time::Duration;
 
 #[link(name = "X11")]
-extern {
+extern "C" {
     fn XOpenDisplay(screen: usize) -> usize;
     fn XStoreName(display: usize, window: usize, name: *const u8) -> i32;
     fn XDefaultRootWindow(display: usize) -> usize;
@@ -24,44 +24,65 @@ fn main() {
             loop {
                 // If we didn't connect to MPD or MPD is not giving us a
                 // status, assume we need to reconnect
-                if mpd.is_err() || mpd.as_mut().ok()
-                        .and_then(|x| x.status().ok()).is_none() {
+                if mpd.is_err() || mpd.as_mut().ok().and_then(|x| x.status().ok()).is_none() {
                     mpd = Client::connect("127.0.0.1:6600");
                 }
 
-                if mpd.as_mut().ok().and_then(|mpd| {
-                    let cs = mpd.currentsong().ok().flatten();
-                    let status = mpd.status().ok();
+                if mpd
+                    .as_mut()
+                    .ok()
+                    .and_then(|mpd| {
+                        let cs = mpd.currentsong().ok().flatten();
+                        let status = mpd.status().ok();
 
-                    let mut song_info = song_info.lock().unwrap();
-                    song_info.clear();
+                        let mut song_info = song_info.lock().unwrap();
+                        song_info.clear();
 
-                    cs.map(|song| {
-                        write!(song_info, "{} - {} - {} ({})",
-                            song.title.as_ref().map(|x| x.as_str())
-                                .unwrap_or("Unknown Song"),
-                            song.tags.get("Artist")
-                                .as_ref().map(|x| x.as_str())
-                                .unwrap_or("Unknown Artist"),
-                            song.tags.get("Album").as_ref().map(|x| x.as_str())
-                                .unwrap_or("Unknown Album"),
-                            song.tags.get("Date").as_ref().map(|x| x.as_str())
-                                .unwrap_or("????")).unwrap();
-                    }).and_then(|_| {
-                        status.map(|status| {
-                            let elapsed = status.elapsed
-                                .unwrap_or(chrono::Duration::zero());
-                            let duration = status.duration
-                                .unwrap_or(chrono::Duration::zero());
+                        cs.map(|song| {
+                            write!(
+                                song_info,
+                                "{} - {} - {} ({})",
+                                song.title
+                                    .as_ref()
+                                    .map(|x| x.as_str())
+                                    .unwrap_or("Unknown Song"),
+                                song.tags
+                                    .get("Artist")
+                                    .as_ref()
+                                    .map(|x| x.as_str())
+                                    .unwrap_or("Unknown Artist"),
+                                song.tags
+                                    .get("Album")
+                                    .as_ref()
+                                    .map(|x| x.as_str())
+                                    .unwrap_or("Unknown Album"),
+                                song.tags
+                                    .get("Date")
+                                    .as_ref()
+                                    .map(|x| x.as_str())
+                                    .unwrap_or("????")
+                            )
+                            .unwrap();
+                        })
+                        .and_then(|_| {
+                            status.map(|status| {
+                                let elapsed = status.elapsed.unwrap_or(chrono::Duration::zero());
+                                let duration = status.duration.unwrap_or(chrono::Duration::zero());
 
-                            write!(song_info, " [{:02}:{:02} - {:02}:{:02}]",
-                                elapsed.num_minutes(),
-                                elapsed.num_seconds() % 60,
-                                duration.num_minutes(),
-                                duration.num_seconds() % 60).unwrap();
+                                write!(
+                                    song_info,
+                                    " [{:02}:{:02} - {:02}:{:02}]",
+                                    elapsed.num_minutes(),
+                                    elapsed.num_seconds() % 60,
+                                    duration.num_minutes(),
+                                    duration.num_seconds() % 60
+                                )
+                                .unwrap();
+                            })
                         })
                     })
-                }).is_none() {
+                    .is_none()
+                {
                     let mut song_info = song_info.lock().unwrap();
                     song_info.clear();
                     write!(song_info, "No song playing").unwrap();
@@ -87,17 +108,19 @@ fn main() {
                 // Get the time and make the status message
                 let local: DateTime<Local> = Local::now();
                 let song_info = song_info.lock().unwrap();
-                write!(status, "{} - {}\0",
-                    song_info, local.format("%F %T.%3f")).unwrap();
+                write!(status, "{} - {}\0", song_info, local.format("%F %T.%3f")).unwrap();
                 drop(song_info);
 
                 // Write and flush the status
-                unsafe { XStoreName(disp, root, status.as_ptr()); }
-                unsafe { XFlush(disp); }
+                unsafe {
+                    XStoreName(disp, root, status.as_ptr());
+                }
+                unsafe {
+                    XFlush(disp);
+                }
 
                 std::thread::sleep(Duration::from_nanos((1e9 / 144.) as u64));
             }
         });
     });
 }
-
