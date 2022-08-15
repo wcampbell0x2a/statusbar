@@ -2,8 +2,9 @@
 
 use chrono::{DateTime, Local};
 use std::fmt::Write;
-use std::sync::mpsc::channel;
+use std::sync::{mpsc::channel, Arc, Mutex};
 use std::time::Duration;
+use sysinfo::{CpuExt, NetworkExt, NetworksExt, ProcessExt, System, SystemExt, UserExt};
 
 #[link(name = "X11")]
 extern "C" {
@@ -17,9 +18,23 @@ fn main() {
     let (bat0_tx, bat0_rx) = channel();
     let (bat1_tx, bat1_rx) = channel();
     let (mem_tx, mem_rx) = channel();
+    let (cpu_tx, cpu_rx) = channel();
+    let mut sys_host_name = String::new();
+    let mut sys_user_name = String::new();
+    let m_sys = Arc::new(Mutex::new(System::new_all()));
+    {
+        let mut sys = m_sys.lock().unwrap();
 
+        sys.refresh_all();
+
+        sys_host_name = sys.host_name().unwrap().to_string();
+        sys_user_name = sys.users()[1].name().to_string();
+
+        for (interface, _) in sys.networks() {
+            println!("{}", interface);
+        }
+    }
     std::thread::scope(|x| {
-        // Second increment update
         x.spawn(move || {
             loop {
                 // Battery 0
@@ -48,21 +63,30 @@ fn main() {
                 mem_tx.send(memory_usage).unwrap();
 
                 // Cpu Usage
+                let mut sys = m_sys.lock().unwrap();
+                sys.refresh_cpu();
+                let new_avg_cpu_usage: f32 =
+                    ((sys.cpus().iter().map(|a| a.cpu_usage()).sum::<f32>())
+                        / sys.cpus().len() as f32)
+                        .ceil();
+                cpu_tx.send(new_avg_cpu_usage).unwrap();
 
-                std::thread::sleep(Duration::from_secs(1));
+                std::thread::sleep(Duration::from_secs(2));
             }
         });
 
+        // Connect to X
+        let disp = unsafe { XOpenDisplay(0) };
+        let root = unsafe { XDefaultRootWindow(disp) };
+
         // X updater thread
         x.spawn(move || {
-            // Connect to X
-            let disp = unsafe { XOpenDisplay(0) };
-            let root = unsafe { XDefaultRootWindow(disp) };
 
             // Status string
             let mut last_bat0 = String::new();
             let mut last_bat1 = String::new();
             let mut last_mem_usage = 0;
+            let mut last_cpu_usage = 0.0;
 
             let mut status = String::new();
 
@@ -79,9 +103,12 @@ fn main() {
                 if let Ok(mem_usage) = mem_rx.try_recv() {
                     last_mem_usage = mem_usage.clone();
                 }
+                if let Ok(cpu_usage) = cpu_rx.try_recv() {
+                    last_cpu_usage = cpu_usage.clone();
+                }
                 write!(
                     status,
-                    "mem {last_mem_usage}%, bat [{last_bat0}%, {last_bat1}%], {}\0",
+                    "[{sys_host_name}][{sys_user_name}] => cpu {last_cpu_usage}%, mem {last_mem_usage}%, bat [{last_bat0}%, {last_bat1}%], {}\0",
                     local.format("%F %T")
                 )
                 .unwrap();
@@ -94,7 +121,8 @@ fn main() {
                     XFlush(disp);
                 }
 
-                std::thread::sleep(Duration::from_nanos((1e9 / 144.) as u64));
+                //std::thread::sleep(Duration::from_nanos((1e9 / 144.) as u64));
+                std::thread::sleep(Duration::from_secs(1));
             }
         });
     });
