@@ -7,5 +7,4 @@ edition = "2021"
 
 [dependencies]
 chrono = "*"
-mpd = "*"
-
+sysinfo = "0.25.1"

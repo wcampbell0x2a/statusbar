@@ -1,7 +1,8 @@
+#![feature(string_remove_matches)]
+
 use chrono::{DateTime, Local};
-use mpd::Client;
 use std::fmt::Write;
-use std::sync::Mutex;
+use std::sync::mpsc::channel;
 use std::time::Duration;
 
 #[link(name = "X11")]
@@ -13,103 +14,77 @@ extern "C" {
 }
 
 fn main() {
-    // Song info
-    let song_info = Mutex::new(String::new());
+    let (bat0_tx, bat0_rx) = channel();
+    let (bat1_tx, bat1_rx) = channel();
+    let (mem_tx, mem_rx) = channel();
 
     std::thread::scope(|x| {
-        // MPD status thread
-        x.spawn(|| {
-            let mut mpd = Client::connect("127.0.0.1:6600");
-
+        // Second increment update
+        x.spawn(move || {
             loop {
-                // If we didn't connect to MPD or MPD is not giving us a
-                // status, assume we need to reconnect
-                if mpd.is_err() || mpd.as_mut().ok().and_then(|x| x.status().ok()).is_none() {
-                    mpd = Client::connect("127.0.0.1:6600");
-                }
+                // Battery 0
+                let mut bat0 =
+                    std::fs::read_to_string("/sys/class/power_supply/BAT0/capacity").unwrap();
+                bat0.remove_matches('\n');
+                bat0_tx.send(bat0).unwrap();
 
-                if mpd
-                    .as_mut()
-                    .ok()
-                    .and_then(|mpd| {
-                        let cs = mpd.currentsong().ok().flatten();
-                        let status = mpd.status().ok();
+                // Battery 1
+                let mut bat1 =
+                    std::fs::read_to_string("/sys/class/power_supply/BAT1/capacity").unwrap();
+                bat1.remove_matches('\n');
+                bat1_tx.send(bat1).unwrap();
 
-                        let mut song_info = song_info.lock().unwrap();
-                        song_info.clear();
+                // Ram usage
+                let ram = std::fs::read_to_string("/proc/meminfo").unwrap();
+                let lines = &ram.split('\n').collect::<Vec<&str>>();
+                // Memory Total
+                let mem_total = lines[0].split_ascii_whitespace().collect::<Vec<&str>>();
+                let mem_total = u64::from_str_radix(mem_total[1], 10).unwrap();
+                // Memory Free
+                let mem_free = lines[1].split_ascii_whitespace().collect::<Vec<&str>>();
+                let mem_free = u64::from_str_radix(mem_free[1], 10).unwrap();
 
-                        cs.map(|song| {
-                            write!(
-                                song_info,
-                                "{} - {} - {} ({})",
-                                song.title
-                                    .as_ref()
-                                    .map(|x| x.as_str())
-                                    .unwrap_or("Unknown Song"),
-                                song.tags
-                                    .get("Artist")
-                                    .as_ref()
-                                    .map(|x| x.as_str())
-                                    .unwrap_or("Unknown Artist"),
-                                song.tags
-                                    .get("Album")
-                                    .as_ref()
-                                    .map(|x| x.as_str())
-                                    .unwrap_or("Unknown Album"),
-                                song.tags
-                                    .get("Date")
-                                    .as_ref()
-                                    .map(|x| x.as_str())
-                                    .unwrap_or("????")
-                            )
-                            .unwrap();
-                        })
-                        .and_then(|_| {
-                            status.map(|status| {
-                                let elapsed = status.elapsed.unwrap_or(chrono::Duration::zero());
-                                let duration = status.duration.unwrap_or(chrono::Duration::zero());
+                let memory_usage = mem_total / mem_free;
+                mem_tx.send(memory_usage).unwrap();
 
-                                write!(
-                                    song_info,
-                                    " [{:02}:{:02} - {:02}:{:02}]",
-                                    elapsed.num_minutes(),
-                                    elapsed.num_seconds() % 60,
-                                    duration.num_minutes(),
-                                    duration.num_seconds() % 60
-                                )
-                                .unwrap();
-                            })
-                        })
-                    })
-                    .is_none()
-                {
-                    let mut song_info = song_info.lock().unwrap();
-                    song_info.clear();
-                    write!(song_info, "No song playing").unwrap();
-                }
+                // Cpu Usage
 
-                std::thread::sleep(Duration::from_nanos((1e9 / 10.) as u64));
+                std::thread::sleep(Duration::from_secs(1));
             }
         });
 
         // X updater thread
-        x.spawn(|| {
+        x.spawn(move || {
             // Connect to X
             let disp = unsafe { XOpenDisplay(0) };
             let root = unsafe { XDefaultRootWindow(disp) };
 
             // Status string
+            let mut last_bat0 = String::new();
+            let mut last_bat1 = String::new();
+            let mut last_mem_usage = 0;
+
             let mut status = String::new();
 
             loop {
-                // Clear status
                 status.clear();
-
                 // Get the time and make the status message
                 let local: DateTime<Local> = Local::now();
-                let song_info = song_info.lock().unwrap();
-                write!(status, "{} - {}\0", song_info, local.format("%F %T.%3f")).unwrap();
-                drop(song_info);
+                if let Ok(bat0) = bat0_rx.try_recv() {
+                    last_bat0 = bat0.clone();
+                }
+                if let Ok(bat1) = bat1_rx.try_recv() {
+                    last_bat1 = bat1.clone();
+                }
+                if let Ok(mem_usage) = mem_rx.try_recv() {
+                    last_mem_usage = mem_usage.clone();
+                }
+                write!(
+                    status,
+                    "mem {last_mem_usage}%, bat [{last_bat0}%, {last_bat1}%], {}\0",
+                    local.format("%F %T")
+                )
+                .unwrap();
 
                 // Write and flush the status
                 unsafe {
