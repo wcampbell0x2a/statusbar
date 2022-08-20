@@ -1,11 +1,12 @@
 #![feature(string_remove_matches)]
 
-use chrono::{DateTime, Local};
-use local_ip_address::list_afinet_netifas;
 use std::fmt::Write;
 use std::net::IpAddr;
 use std::sync::{mpsc::channel, Arc, Mutex};
 use std::time::Duration;
+
+use chrono::{DateTime, Local};
+use local_ip_address::list_afinet_netifas;
 use sysinfo::{CpuExt, System, SystemExt, UserExt};
 
 #[link(name = "X11")]
