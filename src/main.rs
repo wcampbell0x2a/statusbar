@@ -2,6 +2,7 @@
 
 use std::fmt::Write;
 use std::net::IpAddr;
+use std::path::Path;
 use std::sync::{mpsc::channel, Arc, Mutex};
 use std::time::Duration;
 
@@ -17,7 +18,15 @@ extern "C" {
     fn XFlush(display: usize) -> i32;
 }
 
+const BAT0_PATH: &str = "/sys/class/power_supply/BAT0/capacity";
+const BAT1_PATH: &str = "/sys/class/power_supply/BAT1/capacity";
+
 fn main() {
+    // test optional features
+    let battery_00_enable = Path::new(BAT0_PATH).exists();
+    let battery_01_enable = Path::new(BAT1_PATH).exists();
+
+    // start
     let mut ip_addresses = vec![];
     let (bat0_tx, bat0_rx) = channel();
     let (bat1_tx, bat1_rx) = channel();
@@ -57,16 +66,18 @@ fn main() {
         x.spawn(move || {
             loop {
                 // Battery 0
-                let mut bat0 =
-                    std::fs::read_to_string("/sys/class/power_supply/BAT0/capacity").unwrap();
-                bat0.remove_matches('\n');
-                bat0_tx.send(bat0).unwrap();
+                if battery_00_enable {
+                    let mut bat0 = std::fs::read_to_string(BAT0_PATH).unwrap();
+                    bat0.remove_matches('\n');
+                    bat0_tx.send(bat0).unwrap();
+                }
 
                 // Battery 1
-                let mut bat1 =
-                    std::fs::read_to_string("/sys/class/power_supply/BAT1/capacity").unwrap();
-                bat1.remove_matches('\n');
-                bat1_tx.send(bat1).unwrap();
+                if battery_01_enable {
+                    let mut bat1 = std::fs::read_to_string(BAT1_PATH).unwrap();
+                    bat1.remove_matches('\n');
+                    bat1_tx.send(bat1).unwrap();
+                }
 
                 // Ram usage
                 let ram = std::fs::read_to_string("/proc/meminfo").unwrap();
@@ -113,21 +124,39 @@ fn main() {
                 status.clear();
                 // Get the time and make the status message
                 let local: DateTime<Local> = Local::now();
-                if let Ok(bat0) = bat0_rx.try_recv() {
+
+                // Battery
+                let mut battery_s = String::new();
+                if let Ok(bat0) = bat0_rx.try_recv() && battery_00_enable {
                     last_bat0 = bat0.clone();
                 }
-                if let Ok(bat1) = bat1_rx.try_recv() {
+                if !last_bat0.is_empty() {
+                    battery_s.push_str(&format!("{last_bat0}%"));
+                }
+                if let Ok(bat1) = bat1_rx.try_recv() && battery_01_enable {
                     last_bat1 = bat1.clone();
                 }
+                if !last_bat1.is_empty() {
+                    battery_s.push_str(&format!(", {last_bat1}%"));
+                }
+                let battery_s = if battery_s.is_empty() {
+                    String::new()
+                } else {
+                    format!(" bat [{battery_s}],")
+                };
+
+                // Mem
                 if let Ok(mem_usage) = mem_rx.try_recv() {
                     last_mem_usage = mem_usage;
                 }
+
+                // Cpu
                 if let Ok(cpu_usage) = cpu_rx.try_recv() {
                     last_cpu_usage = cpu_usage;
                 }
                 write!(
                     status,
-                    "[{sys_host_name}][{sys_user_name}] => cpu {last_cpu_usage}%, mem {last_mem_usage}%, net {ip_addresses_string}, bat [{last_bat0}%, {last_bat1}%], {}\0",
+                    "[{sys_host_name}][{sys_user_name}] => cpu {last_cpu_usage}%, mem {last_mem_usage}%, net {ip_addresses_string},{battery_s} {}\0",
                     local.format("%F %T")
                 )
                 .unwrap();
