@@ -10,7 +10,7 @@ use chrono::{DateTime, Local};
 use local_ip_address::list_afinet_netifas;
 use sysinfo::{CpuExt, System, SystemExt, UserExt};
 
-#[link(name = "X11")]
+#[link(name = "X11", kind = "static")]
 extern "C" {
     fn XOpenDisplay(screen: usize) -> usize;
     fn XStoreName(display: usize, window: usize, name: *const u8) -> i32;
