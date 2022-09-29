@@ -1,4 +1,5 @@
 #![feature(string_remove_matches)]
+#![feature(let_chains)]
 
 use std::fmt::Write;
 use std::net::IpAddr;
@@ -27,7 +28,7 @@ fn main() {
     let battery_01_enable = Path::new(BAT1_PATH).exists();
 
     // start
-    let mut ip_addresses = vec![];
+    let (ip_addresses_tx, ip_addresses_rx) = channel();
     let (bat0_tx, bat0_rx) = channel();
     let (bat1_tx, bat1_rx) = channel();
     let (mem_tx, mem_rx) = channel();
@@ -40,26 +41,8 @@ fn main() {
 
         sys.refresh_all();
 
-        let network_interfaces = list_afinet_netifas().unwrap();
-        for (_, ip) in network_interfaces.iter().filter(|(name, ip)| {
-            *name == "wlan0" || *name == "enp0s31f6" && matches!(ip, IpAddr::V4(_))
-        }) {
-            ip_addresses.push(ip.to_string());
-        }
-
         (sys.host_name().unwrap(), sys.users()[1].name().to_string())
     };
-
-    // create ip addresses string
-    let mut ip_addresses_string = "[".to_string();
-    for (i, address) in ip_addresses.iter().enumerate() {
-        ip_addresses_string += &address.to_string();
-
-        if i != ip_addresses.len() - 1 {
-            ip_addresses_string += ", ";
-        }
-    }
-    ip_addresses_string += "]";
 
     // Thread updating every n seconds
     std::thread::scope(|x| {
@@ -102,6 +85,29 @@ fn main() {
                 cpu_tx.send(new_avg_cpu_usage).unwrap();
 
                 std::thread::sleep(Duration::from_secs(1));
+
+                // Ip Address
+                let mut ip_addresses = vec![];
+                let network_interfaces = list_afinet_netifas().unwrap();
+                for (_, ip) in network_interfaces.iter().filter(|(name, ip)| {
+                    *name == "wlan0" || *name == "enp0s31f6" && matches!(ip, IpAddr::V4(_))
+                }) {
+                    if !ip_addresses.iter().any(|x| x == &ip.to_string()) {
+                        ip_addresses.push(ip.to_string());
+                    }
+                }
+
+                // create ip addresses string
+                let mut ip_addresses_string = "[".to_string();
+                for (i, address) in ip_addresses.iter().enumerate() {
+                    ip_addresses_string += &address.to_string();
+
+                    if i != ip_addresses.len() - 1 {
+                        ip_addresses_string += ", ";
+                    }
+                }
+                ip_addresses_string += "]";
+                ip_addresses_tx.send(ip_addresses_string).unwrap();
             }
         });
 
@@ -117,6 +123,7 @@ fn main() {
             let mut last_bat1 = String::new();
             let mut last_mem_usage = 0;
             let mut last_cpu_usage = 0.0;
+            let mut last_addrs = String::new();
 
             let mut status = String::new();
 
@@ -154,9 +161,15 @@ fn main() {
                 if let Ok(cpu_usage) = cpu_rx.try_recv() {
                     last_cpu_usage = cpu_usage;
                 }
+
+                // Ip
+                if let Ok(ip_addrs) = ip_addresses_rx.try_recv() {
+                    last_addrs = ip_addrs;
+                }
+
                 write!(
                     status,
-                    "[{sys_host_name}][{sys_user_name}] => cpu {last_cpu_usage}%, mem {last_mem_usage}%, net {ip_addresses_string},{battery_s} {}\0",
+                    "[{sys_host_name}][{sys_user_name}] => cpu {last_cpu_usage}%, mem {last_mem_usage}%, net {last_addrs},{battery_s} {}\0",
                     local.format("%F %T")
                 )
                 .unwrap();
