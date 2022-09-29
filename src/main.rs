@@ -4,20 +4,13 @@
 use std::fmt::Write;
 use std::net::IpAddr;
 use std::path::Path;
+use std::process::Command;
 use std::sync::{mpsc::channel, Arc, Mutex};
 use std::time::Duration;
 
 use chrono::{DateTime, Local};
 use local_ip_address::list_afinet_netifas;
 use sysinfo::{CpuExt, System, SystemExt, UserExt};
-
-#[link(name = "X11")]
-extern "C" {
-    fn XOpenDisplay(screen: usize) -> usize;
-    fn XStoreName(display: usize, window: usize, name: *const u8) -> i32;
-    fn XDefaultRootWindow(display: usize) -> usize;
-    fn XFlush(display: usize) -> i32;
-}
 
 const BAT0_PATH: &str = "/sys/class/power_supply/BAT0/capacity";
 const BAT1_PATH: &str = "/sys/class/power_supply/BAT1/capacity";
@@ -111,10 +104,6 @@ fn main() {
             }
         });
 
-        // Connect to X
-        let disp = unsafe { XOpenDisplay(0) };
-        let root = unsafe { XDefaultRootWindow(disp) };
-
         // X updater thread
         x.spawn(move || {
 
@@ -169,18 +158,17 @@ fn main() {
 
                 write!(
                     status,
-                    "[{sys_host_name}][{sys_user_name}] => cpu {last_cpu_usage}%, mem {last_mem_usage}%, net {last_addrs},{battery_s} {}\0",
+                    "[{sys_host_name}][{sys_user_name}] => cpu {last_cpu_usage}%, mem {last_mem_usage}%, net {last_addrs},{battery_s} {}",
                     local.format("%F %T")
                 )
                 .unwrap();
 
                 // Write and flush the status
-                unsafe {
-                    XStoreName(disp, root, status.as_ptr());
-                }
-                unsafe {
-                    XFlush(disp);
-                }
+                Command::new("xsetroot")
+                    .args(["-name"])
+                    .args([&status])
+                    .spawn()
+                    .unwrap();
 
                 //std::thread::sleep(Duration::from_nanos((1e9 / 144.) as u64));
                 std::thread::sleep(Duration::from_secs(1));

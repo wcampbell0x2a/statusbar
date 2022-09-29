@@ -1,0 +1,21 @@
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+name: build
+jobs:
+  # build, test all supported targets
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          target:  x86_64-unknown-linux-musl
+      - run: cargo build --release
+
