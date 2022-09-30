@@ -13,3 +13,19 @@ A DWM statusbar that shows the following information:
 
 ## install
 `cargo install statusbar` or see our github [releases](https://github.com/wcampbell0x2a/statusbar/releases).
+
+## usage
+```
+Usage: statusbar [OPTIONS]
+
+Options:
+      --interface <INTERFACE>  network interface for display of ip addresses
+      --username <USERNAME>    override return from first user in sys.users()
+  -h, --help                   Print help information
+  -V, --version                Print version information
+```
+
+For example:
+```
+./statusbar --interface wlan0 --interface enp0s31f6
+```

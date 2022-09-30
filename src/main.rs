@@ -9,13 +9,28 @@ use std::sync::{mpsc::channel, Arc, Mutex};
 use std::time::Duration;
 
 use chrono::{DateTime, Local};
+use clap::Parser;
 use local_ip_address::list_afinet_netifas;
 use sysinfo::{CpuExt, System, SystemExt, UserExt};
 
 const BAT0_PATH: &str = "/sys/class/power_supply/BAT0/capacity";
 const BAT1_PATH: &str = "/sys/class/power_supply/BAT1/capacity";
 
+#[derive(Debug, Parser)]
+#[command(version)]
+struct Cli {
+    /// network interface for display of ip addresses
+    #[arg(long)]
+    interface: Vec<String>,
+
+    /// override return from first user in sys.users()
+    #[arg(long)]
+    username: Option<String>,
+}
+
 fn main() {
+    let args = Cli::parse();
+
     // test optional features
     let battery_00_enable = Path::new(BAT0_PATH).exists();
     let battery_01_enable = Path::new(BAT1_PATH).exists();
@@ -29,13 +44,18 @@ fn main() {
     let m_sys = Arc::new(Mutex::new(System::new_all()));
 
     // First call to sys functions, grabbing host_name and user name, and also ip addresses
-    let (sys_host_name, sys_user_name) = {
+    let (sys_host_name, mut sys_user_name) = {
         let mut sys = m_sys.lock().unwrap();
 
         sys.refresh_all();
 
         (sys.host_name().unwrap(), sys.users()[1].name().to_string())
     };
+
+    // overide sys.users()
+    if let Some(username) = args.username {
+        sys_user_name = username;
+    }
 
     // Thread updating every n seconds
     std::thread::scope(|x| {
@@ -83,7 +103,7 @@ fn main() {
                 let mut ip_addresses = vec![];
                 let network_interfaces = list_afinet_netifas().unwrap();
                 for (_, ip) in network_interfaces.iter().filter(|(name, ip)| {
-                    *name == "wlan0" || *name == "enp0s31f6" && matches!(ip, IpAddr::V4(_))
+                    args.interface.iter().any(|a| *a == *name) && matches!(ip, IpAddr::V4(_))
                 }) {
                     if !ip_addresses.iter().any(|x| x == &ip.to_string()) {
                         ip_addresses.push(ip.to_string());
