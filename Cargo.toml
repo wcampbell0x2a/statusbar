@@ -6,6 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-chrono = "*"
+chrono = "0.4.22"
 local-ip-address = "0.4.7"
 sysinfo = "0.25.1"
