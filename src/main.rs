@@ -184,11 +184,10 @@ fn main() {
                 .unwrap();
 
                 // Write and flush the status
-                Command::new("xsetroot")
+                let _ = Command::new("xsetroot")
                     .args(["-name"])
                     .args([&status])
-                    .spawn()
-                    .unwrap();
+                    .spawn();
 
                 //std::thread::sleep(Duration::from_nanos((1e9 / 144.) as u64));
                 std::thread::sleep(Duration::from_secs(1));
