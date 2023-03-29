@@ -5,13 +5,14 @@ use std::fmt::Write;
 use std::net::IpAddr;
 use std::path::Path;
 use std::process::Command;
-use std::sync::{mpsc::channel, Arc, Mutex};
+use std::sync::mpsc::channel;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use chrono::{DateTime, Local};
 use clap::Parser;
 use local_ip_address::list_afinet_netifas;
-use sysinfo::{CpuExt, System, SystemExt, UserExt};
+use sysinfo::{System, SystemExt, UserExt};
 
 const BAT0_PATH: &str = "/sys/class/power_supply/BAT0/capacity";
 const BAT1_PATH: &str = "/sys/class/power_supply/BAT1/capacity";
@@ -91,11 +92,15 @@ fn main() {
                 // Cpu Usage
                 let mut sys = m_sys.lock().unwrap();
                 sys.refresh_cpu();
-                let new_avg_cpu_usage: f32 =
-                    ((sys.cpus().iter().map(|a| a.cpu_usage()).sum::<f32>())
-                        / sys.cpus().len() as f32)
-                        .ceil();
+                let new_avg_cpu_usage: f32 = ((sys
+                    .cpus()
+                    .iter()
+                    .map(sysinfo::CpuExt::cpu_usage)
+                    .sum::<f32>())
+                    / sys.cpus().len() as f32)
+                    .ceil();
                 cpu_tx.send(new_avg_cpu_usage).unwrap();
+                drop(sys);
 
                 std::thread::sleep(Duration::from_secs(1));
 
@@ -185,11 +190,10 @@ fn main() {
 
                 // Write and flush the status
                 let _ = Command::new("xsetroot")
-                    .args(["-name"])
-                    .args([&status])
-                    .spawn();
+                    .args(["-name", &status])
+                    .status()
+                    .unwrap();
 
-                //std::thread::sleep(Duration::from_nanos((1e9 / 144.) as u64));
                 std::thread::sleep(Duration::from_secs(1));
             }
         });
