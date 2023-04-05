@@ -21,8 +21,8 @@ Usage: statusbar [OPTIONS]
 Options:
       --interface <INTERFACE>  network interface for display of ip addresses
       --username <USERNAME>    override return from first user in sys.users()
-  -h, --help                   Print help information
-  -V, --version                Print version information
+  -h, --help                   Print help
+  -V, --version                Print version
 ```
 
 For example:
