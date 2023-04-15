@@ -12,7 +12,7 @@ use std::time::Duration;
 use chrono::{DateTime, Local};
 use clap::Parser;
 use local_ip_address::list_afinet_netifas;
-use sysinfo::{System, SystemExt, UserExt};
+use sysinfo::{get_current_pid, ProcessExt, System, SystemExt, UserExt};
 
 const BAT0_PATH: &str = "/sys/class/power_supply/BAT0/capacity";
 const BAT1_PATH: &str = "/sys/class/power_supply/BAT1/capacity";
@@ -50,7 +50,16 @@ fn main() {
 
         sys.refresh_all();
 
-        (sys.host_name().unwrap(), sys.users()[1].name().to_string())
+        let pid = get_current_pid().unwrap();
+
+        let mut name = "";
+        if let Some(process) = sys.process(pid) {
+            if let Some(user_id) = process.user_id() {
+                name = sys.get_user_by_id(user_id).unwrap().name();
+            }
+        }
+
+        (sys.host_name().unwrap(), name.to_string())
     };
 
     // overide sys.users()
