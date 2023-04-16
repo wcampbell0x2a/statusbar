@@ -12,7 +12,7 @@ A DWM statusbar that shows the following information:
 ```
 
 ## install
-`cargo install statusbar` or see our github [releases](https://github.com/wcampbell0x2a/statusbar/releases).
+`cargo install --locked statusbar` or see our github [releases](https://github.com/wcampbell0x2a/statusbar/releases).
 
 ## usage
 ```
