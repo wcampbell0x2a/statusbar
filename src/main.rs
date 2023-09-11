@@ -192,7 +192,7 @@ fn main() {
 
                 write!(
                     status,
-                    "[{sys_host_name}][{sys_user_name}] => cpu {last_cpu_usage}%, mem {last_mem_usage}%, net {last_addrs},{battery_s} {}",
+                    "[{sys_host_name}][{sys_user_name}] => cpu {last_cpu_usage:02}%, mem {last_mem_usage:02}%, net {last_addrs},{battery_s} {}",
                     local.format("%F %T")
                 )
                 .unwrap();
