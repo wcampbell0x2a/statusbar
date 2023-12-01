@@ -45,27 +45,27 @@ fn main() {
     let m_sys = Arc::new(Mutex::new(System::new_all()));
 
     // First call to sys functions, grabbing host_name and user name, and also ip addresses
-    let (sys_host_name, mut sys_user_name) = {
+    let (sys_host_name, sys_user_name) = {
         let mut sys = m_sys.lock().unwrap();
 
         sys.refresh_all();
 
         let pid = get_current_pid().unwrap();
 
+        // overide sys.users()
         let mut name = "";
-        if let Some(process) = sys.process(pid) {
-            if let Some(user_id) = process.user_id() {
-                name = sys.get_user_by_id(user_id).unwrap().name();
+        if let Some(username) = &args.username {
+            name = username;
+        } else {
+            if let Some(process) = sys.process(pid) {
+                if let Some(user_id) = process.user_id() {
+                    name = sys.get_user_by_id(user_id).unwrap().name();
+                }
             }
         }
 
         (sys.host_name().unwrap(), name.to_string())
     };
-
-    // overide sys.users()
-    if let Some(username) = args.username {
-        sys_user_name = username;
-    }
 
     // Thread updating every n seconds
     std::thread::scope(|x| {
