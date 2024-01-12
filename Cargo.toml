@@ -11,7 +11,7 @@ keywords = ["statusbar", "dwm", "linux"]
 
 [dependencies]
 chrono = "0.4.31"
-clap = { version = "4.4.10", features = ["derive"] }
+clap = { version = "4.4.16", features = ["derive"] }
 local-ip-address = "0.5.6"
 sysinfo = "0.28.0"
 
