@@ -10,7 +10,7 @@ repository = "https://github.com/wcampbell0x2a/statusbar"
 keywords = ["statusbar", "dwm", "linux"]
 
 [dependencies]
-chrono = "0.4.31"
+chrono = "0.4.35"
 clap = { version = "4.4.18", features = ["derive"] }
 local-ip-address = "0.5.6"
 sysinfo = "0.28.0"
