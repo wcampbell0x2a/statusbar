@@ -62,21 +62,19 @@ fn main() {
         // overide sys.users()
         let name = if let Some(username) = &args.username {
             username.clone()
-        } else {
-            if let Some(process) = sys.process(pid) {
-                if let Some(user_id) = process.user_id() {
-                    let users = Users::new_with_refreshed_list();
-                    if let Some(user) = users.iter().find(|u| u.id() == user_id) {
-                        user.name().to_string()
-                    } else {
-                        String::new()
-                    }
+        } else if let Some(process) = sys.process(pid) {
+            if let Some(user_id) = process.user_id() {
+                let users = Users::new_with_refreshed_list();
+                if let Some(user) = users.iter().find(|u| u.id() == user_id) {
+                    user.name().to_string()
                 } else {
                     String::new()
                 }
             } else {
                 String::new()
             }
+        } else {
+            String::new()
         };
 
         (System::host_name().unwrap(), name)
