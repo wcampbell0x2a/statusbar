@@ -173,11 +173,19 @@ fn main() {
 
     // First call to sys functions, grabbing host_name and user name, and also ip addresses
     let (sys_host_name, sys_user_name) = {
-        let mut sys = m_sys.lock().unwrap();
+        let mut sys = m_sys.lock().unwrap_or_else(|e| e.into_inner());
 
         sys.refresh_all();
 
-        let pid = get_current_pid().unwrap();
+        let pid = loop {
+            match get_current_pid() {
+                Ok(pid) => break pid,
+                Err(_) => {
+                    std::thread::sleep(Duration::from_millis(100));
+                    continue;
+                }
+            }
+        };
 
         // overide sys.users()
         let name = if let Some(username) = &args.username {
@@ -197,7 +205,17 @@ fn main() {
             String::new()
         };
 
-        (System::host_name().unwrap(), name)
+        let hostname = loop {
+            match System::host_name() {
+                Some(name) => break name,
+                None => {
+                    std::thread::sleep(Duration::from_millis(100));
+                    continue;
+                }
+            }
+        };
+
+        (hostname, name)
     };
 
     // Thread updating every n seconds
@@ -206,12 +224,16 @@ fn main() {
             loop {
                 // Battery 0
                 if battery_00_enable && let Some(bat0) = read_battery_capacity(BAT0_PATH) {
-                    bat0_tx.send(bat0).unwrap();
+                    while bat0_tx.send(bat0.clone()).is_err() {
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
                 }
 
                 // Battery 1
                 if battery_01_enable && let Some(bat1) = read_battery_capacity(BAT1_PATH) {
-                    bat1_tx.send(bat1).unwrap();
+                    while bat1_tx.send(bat1.clone()).is_err() {
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
                 }
 
                 // Total Wattage
@@ -224,7 +246,9 @@ fn main() {
                 }
                 // Convert from microwatts to watts
                 let total_wattage = total_wattage_uw as f64 / 1_000_000.0;
-                wattage_tx.send(total_wattage).unwrap();
+                while wattage_tx.send(total_wattage).is_err() {
+                    std::thread::sleep(Duration::from_millis(100));
+                }
 
                 // AC Online status
                 let ac_online = if ac_online_enable {
@@ -232,28 +256,36 @@ fn main() {
                 } else {
                     false
                 };
-                ac_online_tx.send(ac_online).unwrap();
+                while ac_online_tx.send(ac_online).is_err() {
+                    std::thread::sleep(Duration::from_millis(100));
+                }
 
                 // Ram usage
                 if let Some(memory_usage_percent) = get_memory_usage_percent() {
-                    mem_tx.send(memory_usage_percent).unwrap();
+                    while mem_tx.send(memory_usage_percent).is_err() {
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
                 }
 
                 // Cpu Usage
-                let mut sys = m_sys.lock().unwrap();
+                let mut sys = m_sys.lock().unwrap_or_else(|e| e.into_inner());
                 sys.refresh_cpu_all();
                 let new_avg_cpu_usage: f32 =
                     ((sys.cpus().iter().map(|cpu| cpu.cpu_usage()).sum::<f32>())
                         / sys.cpus().len() as f32)
                         .ceil();
-                cpu_tx.send(new_avg_cpu_usage).unwrap();
+                while cpu_tx.send(new_avg_cpu_usage).is_err() {
+                    std::thread::sleep(Duration::from_millis(100));
+                }
                 drop(sys);
 
                 std::thread::sleep(Duration::from_secs(1));
 
                 // IP Address
                 let ip_addresses_string = format_ip_addresses(&args.interface);
-                ip_addresses_tx.send(ip_addresses_string).unwrap();
+                while ip_addresses_tx.send(ip_addresses_string.clone()).is_err() {
+                    std::thread::sleep(Duration::from_millis(100));
+                }
             }
         });
 
@@ -315,18 +347,29 @@ fn main() {
                 }
 
                 let ac_indicator = if last_ac_online { " [AC]" } else { "" };
-                write!(
+                if write!(
                     status,
                     "[{sys_host_name}][{sys_user_name}] => cpu {last_cpu_usage:02}%, mem {last_mem_usage:02}%, net {last_addrs},{battery_s} pwr {last_wattage:.1}W{ac_indicator}, {}",
                     local.format("%F %T")
                 )
-                .unwrap();
+                .is_err()
+                {
+                    std::thread::sleep(Duration::from_millis(100));
+                    continue;
+                }
 
-                // Write and flush the status
-                let _ = Command::new("xsetroot")
-                    .args(["-name", &status])
-                    .status()
-                    .unwrap();
+                loop {
+                    match Command::new("xsetroot")
+                        .args(["-name", &status])
+                        .status()
+                    {
+                        Ok(_) => break,
+                        Err(_) => {
+                            std::thread::sleep(Duration::from_millis(100));
+                            continue;
+                        }
+                    }
+                }
 
                 std::thread::sleep(Duration::from_secs(1));
             }
