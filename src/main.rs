@@ -1,5 +1,3 @@
-#![feature(string_remove_matches)]
-
 use std::fmt::Write;
 use std::net::IpAddr;
 use std::path::Path;
@@ -24,7 +22,7 @@ const AC_ONLINE_PATH: &str = "/sys/class/power_supply/AC/online";
 fn get_wifi_ssid(interface: &str) -> Option<String> {
     use nl80211::Socket;
 
-    let result = Socket::connect()
+    Socket::connect()
         .ok()
         .and_then(|mut socket| socket.get_interfaces_info().ok())
         .and_then(|interfaces| {
@@ -41,9 +39,104 @@ fn get_wifi_ssid(interface: &str) -> Option<String> {
         .and_then(|iface| {
             // Extract SSID if available
             iface.ssid.and_then(|ssid| String::from_utf8(ssid).ok())
-        });
+        })
+}
 
+/// Read battery capacity from a given path
+fn read_battery_capacity(path: &str) -> Option<String> {
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|s| s.trim().to_string())
+}
+
+/// Read power consumption from a given path (in microwatts)
+fn read_power_uw(path: &str) -> Option<u64> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+}
+
+/// Calculate memory usage percentage from /proc/meminfo
+fn get_memory_usage_percent() -> Option<u64> {
+    let meminfo = std::fs::read_to_string("/proc/meminfo").ok()?;
+    let lines: Vec<&str> = meminfo.split('\n').collect();
+
+    let mem_total = lines
+        .first()?
+        .split_ascii_whitespace()
+        .nth(1)?
+        .parse::<u64>()
+        .ok()?;
+
+    let mem_free = lines
+        .get(1)?
+        .split_ascii_whitespace()
+        .nth(1)?
+        .parse::<u64>()
+        .ok()?;
+
+    Some(((mem_total - mem_free) * 100) / mem_total)
+}
+
+/// Get AC adapter online status
+fn get_ac_online_status(path: &str) -> bool {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| s.trim().parse::<u8>().ok())
+        .map(|status| status == 1)
+        .unwrap_or(false)
+}
+
+/// Format IP addresses with WiFi SSID if available
+fn format_ip_addresses(interfaces: &[String]) -> String {
+    let network_interfaces = list_afinet_netifas().unwrap_or_default();
+    let mut ip_addresses: Vec<(String, String)> = vec![];
+
+    for (name, ip) in network_interfaces
+        .iter()
+        .filter(|(name, ip)| interfaces.contains(name) && matches!(ip, IpAddr::V4(_)))
+    {
+        let ip_str = ip.to_string();
+        if !ip_addresses
+            .iter()
+            .any(|(_, existing_ip)| *existing_ip == ip_str)
+        {
+            ip_addresses.push((name.clone(), ip_str));
+        }
+    }
+
+    let mut result = String::from("[");
+    for (i, (interface, address)) in ip_addresses.iter().enumerate() {
+        result.push_str(address);
+
+        if let Some(ssid) = get_wifi_ssid(interface) {
+            result.push_str(&format!("[{}]", ssid));
+        }
+
+        if i != ip_addresses.len() - 1 {
+            result.push_str(", ");
+        }
+    }
+    result.push(']');
     result
+}
+
+/// Format battery status string
+fn format_battery_status(bat0: &str, bat1: &str) -> String {
+    let mut battery_levels = Vec::new();
+
+    if !bat0.is_empty() {
+        battery_levels.push(format!("{}%", bat0));
+    }
+    if !bat1.is_empty() {
+        battery_levels.push(format!("{}%", bat1));
+    }
+
+    if battery_levels.is_empty() {
+        String::new()
+    } else {
+        format!(" bat [{}],", battery_levels.join(", "))
+    }
 }
 
 #[derive(Debug, Parser)]
@@ -112,59 +205,39 @@ fn main() {
         x.spawn(move || {
             loop {
                 // Battery 0
-                if battery_00_enable {
-                    let mut bat0 = std::fs::read_to_string(BAT0_PATH).unwrap();
-                    bat0.remove_matches('\n');
+                if battery_00_enable && let Some(bat0) = read_battery_capacity(BAT0_PATH) {
                     bat0_tx.send(bat0).unwrap();
                 }
 
                 // Battery 1
-                if battery_01_enable {
-                    let mut bat1 = std::fs::read_to_string(BAT1_PATH).unwrap();
-                    bat1.remove_matches('\n');
+                if battery_01_enable && let Some(bat1) = read_battery_capacity(BAT1_PATH) {
                     bat1_tx.send(bat1).unwrap();
                 }
 
                 // Total Wattage
                 let mut total_wattage_uw: u64 = 0;
-                if bat0_power_enable
-                    && let Ok(power) = std::fs::read_to_string(BAT0_POWER_PATH)
-                    && let Ok(power_uw) = power.trim().parse::<u64>()
-                {
+                if bat0_power_enable && let Some(power_uw) = read_power_uw(BAT0_POWER_PATH) {
                     total_wattage_uw += power_uw;
                 }
-                if bat1_power_enable
-                    && let Ok(power) = std::fs::read_to_string(BAT1_POWER_PATH)
-                    && let Ok(power_uw) = power.trim().parse::<u64>()
-                {
+                if bat1_power_enable && let Some(power_uw) = read_power_uw(BAT1_POWER_PATH) {
                     total_wattage_uw += power_uw;
                 }
-                // Convert from microwatts to watts with one decimal place
+                // Convert from microwatts to watts
                 let total_wattage = total_wattage_uw as f64 / 1_000_000.0;
                 wattage_tx.send(total_wattage).unwrap();
 
                 // AC Online status
-                let mut ac_online = false;
-                if ac_online_enable
-                    && let Ok(status) = std::fs::read_to_string(AC_ONLINE_PATH)
-                    && let Ok(online) = status.trim().parse::<u8>()
-                {
-                    ac_online = online == 1;
-                }
+                let ac_online = if ac_online_enable {
+                    get_ac_online_status(AC_ONLINE_PATH)
+                } else {
+                    false
+                };
                 ac_online_tx.send(ac_online).unwrap();
 
                 // Ram usage
-                let ram = std::fs::read_to_string("/proc/meminfo").unwrap();
-                let lines = &ram.split('\n').collect::<Vec<&str>>();
-                // Memory Total
-                let mem_total = lines[0].split_ascii_whitespace().collect::<Vec<&str>>();
-                let mem_total = mem_total[1].parse::<u64>().unwrap();
-                // Memory Free
-                let mem_free = lines[1].split_ascii_whitespace().collect::<Vec<&str>>();
-                let mem_free = mem_free[1].parse::<u64>().unwrap();
-
-                let memory_usage = mem_total / mem_free;
-                mem_tx.send(memory_usage).unwrap();
+                if let Some(memory_usage_percent) = get_memory_usage_percent() {
+                    mem_tx.send(memory_usage_percent).unwrap();
+                }
 
                 // Cpu Usage
                 let mut sys = m_sys.lock().unwrap();
@@ -178,35 +251,8 @@ fn main() {
 
                 std::thread::sleep(Duration::from_secs(1));
 
-                // Ip Address
-                let mut ip_addresses: Vec<(String, String)> = vec![];
-                let network_interfaces = list_afinet_netifas().unwrap();
-                for (name, ip) in network_interfaces.iter().filter(|(name, ip)| {
-                    args.interface.contains(name) && matches!(ip, IpAddr::V4(_))
-                }) {
-                    let ip_str = ip.to_string();
-                    if !ip_addresses
-                        .iter()
-                        .any(|(_, existing_ip)| *existing_ip == ip_str)
-                    {
-                        ip_addresses.push((name.clone(), ip_str));
-                    }
-                }
-
-                // create ip addresses string
-                let mut ip_addresses_string = "[".to_string();
-                for (i, (interface, address)) in ip_addresses.iter().enumerate() {
-                    ip_addresses_string += address;
-
-                    if let Some(ssid) = get_wifi_ssid(interface) {
-                        ip_addresses_string += &format!("[{}]", ssid);
-                    }
-
-                    if i != ip_addresses.len() - 1 {
-                        ip_addresses_string += ", ";
-                    }
-                }
-                ip_addresses_string += "]";
+                // IP Address
+                let ip_addresses_string = format_ip_addresses(&args.interface);
                 ip_addresses_tx.send(ip_addresses_string).unwrap();
             }
         });
@@ -231,24 +277,17 @@ fn main() {
                 let local: DateTime<Local> = Local::now();
 
                 // Battery
-                let mut battery_s = String::new();
-                if let Ok(bat0) = bat0_rx.try_recv() && battery_00_enable {
-                    last_bat0 = bat0.clone();
+                if let Ok(bat0) = bat0_rx.try_recv()
+                    && battery_00_enable
+                {
+                    last_bat0 = bat0;
                 }
-                if !last_bat0.is_empty() {
-                    battery_s.push_str(&format!("{last_bat0}%"));
+                if let Ok(bat1) = bat1_rx.try_recv()
+                    && battery_01_enable
+                {
+                    last_bat1 = bat1;
                 }
-                if let Ok(bat1) = bat1_rx.try_recv() && battery_01_enable {
-                    last_bat1 = bat1.clone();
-                }
-                if !last_bat1.is_empty() {
-                    battery_s.push_str(&format!(", {last_bat1}%"));
-                }
-                let battery_s = if battery_s.is_empty() {
-                    String::new()
-                } else {
-                    format!(" bat [{battery_s}],")
-                };
+                let battery_s = format_battery_status(&last_bat0, &last_bat1);
 
                 // Wattage
                 if let Ok(wattage) = wattage_rx.try_recv() {
