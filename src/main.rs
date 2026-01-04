@@ -102,19 +102,17 @@ fn main() {
 
                 // Total Wattage
                 let mut total_wattage_uw: u64 = 0;
-                if bat0_power_enable {
-                    if let Ok(power) = std::fs::read_to_string(BAT0_POWER_PATH) {
-                        if let Ok(power_uw) = power.trim().parse::<u64>() {
-                            total_wattage_uw += power_uw;
-                        }
-                    }
+                if bat0_power_enable
+                    && let Ok(power) = std::fs::read_to_string(BAT0_POWER_PATH)
+                    && let Ok(power_uw) = power.trim().parse::<u64>()
+                {
+                    total_wattage_uw += power_uw;
                 }
-                if bat1_power_enable {
-                    if let Ok(power) = std::fs::read_to_string(BAT1_POWER_PATH) {
-                        if let Ok(power_uw) = power.trim().parse::<u64>() {
-                            total_wattage_uw += power_uw;
-                        }
-                    }
+                if bat1_power_enable
+                    && let Ok(power) = std::fs::read_to_string(BAT1_POWER_PATH)
+                    && let Ok(power_uw) = power.trim().parse::<u64>()
+                {
+                    total_wattage_uw += power_uw;
                 }
                 // Convert from microwatts to watts with one decimal place
                 let total_wattage = total_wattage_uw as f64 / 1_000_000.0;
@@ -122,12 +120,11 @@ fn main() {
 
                 // AC Online status
                 let mut ac_online = false;
-                if ac_online_enable {
-                    if let Ok(status) = std::fs::read_to_string(AC_ONLINE_PATH) {
-                        if let Ok(online) = status.trim().parse::<u8>() {
-                            ac_online = online == 1;
-                        }
-                    }
+                if ac_online_enable
+                    && let Ok(status) = std::fs::read_to_string(AC_ONLINE_PATH)
+                    && let Ok(online) = status.trim().parse::<u8>()
+                {
+                    ac_online = online == 1;
                 }
                 ac_online_tx.send(ac_online).unwrap();
 
