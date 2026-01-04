@@ -59,23 +59,31 @@ fn read_power_uw(path: &str) -> Option<u64> {
 /// Calculate memory usage percentage from /proc/meminfo
 fn get_memory_usage_percent() -> Option<u64> {
     let meminfo = std::fs::read_to_string("/proc/meminfo").ok()?;
-    let lines: Vec<&str> = meminfo.split('\n').collect();
 
-    let mem_total = lines
-        .first()?
-        .split_ascii_whitespace()
-        .nth(1)?
-        .parse::<u64>()
-        .ok()?;
+    let mut mem_total = None;
+    let mut mem_available = None;
 
-    let mem_free = lines
-        .get(1)?
-        .split_ascii_whitespace()
-        .nth(1)?
-        .parse::<u64>()
-        .ok()?;
+    for line in meminfo.lines() {
+        let parts: Vec<&str> = line.split_ascii_whitespace().collect();
+        if parts.len() < 2 {
+            continue;
+        }
 
-    Some(((mem_total - mem_free) * 100) / mem_total)
+        match parts[0] {
+            "MemTotal:" => mem_total = parts[1].parse::<u64>().ok(),
+            "MemAvailable:" => mem_available = parts[1].parse::<u64>().ok(),
+            _ => {}
+        }
+
+        if mem_total.is_some() && mem_available.is_some() {
+            break;
+        }
+    }
+
+    let total = mem_total?;
+    let available = mem_available?;
+
+    Some(((total - available) * 100) / total)
 }
 
 /// Get AC adapter online status
