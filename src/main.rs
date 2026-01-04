@@ -19,6 +19,33 @@ const BAT0_POWER_PATH: &str = "/sys/class/power_supply/BAT0/power_now";
 const BAT1_POWER_PATH: &str = "/sys/class/power_supply/BAT1/power_now";
 const AC_ONLINE_PATH: &str = "/sys/class/power_supply/AC/online";
 
+/// Get WiFi SSID for a network interface
+/// Returns Some(ssid) if the interface is WiFi and connected, None otherwise
+fn get_wifi_ssid(interface: &str) -> Option<String> {
+    use nl80211::Socket;
+
+    let result = Socket::connect()
+        .ok()
+        .and_then(|mut socket| socket.get_interfaces_info().ok())
+        .and_then(|interfaces| {
+            interfaces.into_iter().find(|iface| {
+                let name = iface
+                    .name
+                    .as_ref()
+                    .and_then(|name| String::from_utf8(name.clone()).ok())
+                    .map(|s| s.trim_end_matches('\0').to_string());
+
+                name.map(|name| name == interface).unwrap_or(false)
+            })
+        })
+        .and_then(|iface| {
+            // Extract SSID if available
+            iface.ssid.and_then(|ssid| String::from_utf8(ssid).ok())
+        });
+
+    result
+}
+
 #[derive(Debug, Parser)]
 #[command(version)]
 struct Cli {
@@ -142,33 +169,38 @@ fn main() {
                 // Cpu Usage
                 let mut sys = m_sys.lock().unwrap();
                 sys.refresh_cpu_all();
-                let new_avg_cpu_usage: f32 = ((sys
-                    .cpus()
-                    .iter()
-                    .map(|cpu| cpu.cpu_usage())
-                    .sum::<f32>())
-                    / sys.cpus().len() as f32)
-                    .ceil();
+                let new_avg_cpu_usage: f32 =
+                    ((sys.cpus().iter().map(|cpu| cpu.cpu_usage()).sum::<f32>())
+                        / sys.cpus().len() as f32)
+                        .ceil();
                 cpu_tx.send(new_avg_cpu_usage).unwrap();
                 drop(sys);
 
                 std::thread::sleep(Duration::from_secs(1));
 
                 // Ip Address
-                let mut ip_addresses = vec![];
+                let mut ip_addresses: Vec<(String, String)> = vec![];
                 let network_interfaces = list_afinet_netifas().unwrap();
-                for (_, ip) in network_interfaces.iter().filter(|(name, ip)| {
-                    args.interface.iter().any(|a| *a == *name) && matches!(ip, IpAddr::V4(_))
+                for (name, ip) in network_interfaces.iter().filter(|(name, ip)| {
+                    args.interface.contains(name) && matches!(ip, IpAddr::V4(_))
                 }) {
-                    if !ip_addresses.iter().any(|x| x == &ip.to_string()) {
-                        ip_addresses.push(ip.to_string());
+                    let ip_str = ip.to_string();
+                    if !ip_addresses
+                        .iter()
+                        .any(|(_, existing_ip)| *existing_ip == ip_str)
+                    {
+                        ip_addresses.push((name.clone(), ip_str));
                     }
                 }
 
                 // create ip addresses string
                 let mut ip_addresses_string = "[".to_string();
-                for (i, address) in ip_addresses.iter().enumerate() {
-                    ip_addresses_string += &address.to_string();
+                for (i, (interface, address)) in ip_addresses.iter().enumerate() {
+                    ip_addresses_string += address;
+
+                    if let Some(ssid) = get_wifi_ssid(interface) {
+                        ip_addresses_string += &format!("[{}]", ssid);
+                    }
 
                     if i != ip_addresses.len() - 1 {
                         ip_addresses_string += ", ";

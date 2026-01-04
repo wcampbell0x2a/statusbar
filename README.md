@@ -8,7 +8,7 @@ statusbar
 
 A DWM statusbar that shows the following information:
 ```
-[hostname][user] => cpu %, mem %, net [ip0, ip1], bat [bat0, bat1], date time
+[hostname][user] => cpu %, mem %, net [ip0, ip1[ssid]], bat [bat0, bat1], pwr 0.0W [AC], date time
 ```
 
 ## install
