@@ -366,18 +366,10 @@ fn main() {
                     continue;
                 }
 
-                loop {
-                    match Command::new("xsetroot")
-                        .args(["-name", &status])
-                        .status()
-                    {
-                        Ok(_) => break,
-                        Err(_) => {
-                            std::thread::sleep(Duration::from_millis(100));
-                            continue;
-                        }
-                    }
-                }
+                let _ = Command::new("xsetroot")
+                    .args(["-name", &status])
+                    .spawn()
+                    .and_then(|mut child| child.wait());
 
                 std::thread::sleep(Duration::from_secs(1));
             }
