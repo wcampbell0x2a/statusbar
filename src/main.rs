@@ -9,6 +9,7 @@ use std::time::Duration;
 use chrono::{DateTime, Local};
 use clap::Parser;
 use local_ip_address::list_afinet_netifas;
+use nl80211::Socket;
 use sysinfo::{System, Users, get_current_pid};
 
 const BAT0_PATH: &str = "/sys/class/power_supply/BAT0/capacity";
@@ -19,12 +20,10 @@ const AC_ONLINE_PATH: &str = "/sys/class/power_supply/AC/online";
 
 /// Get WiFi SSID for a network interface
 /// Returns Some(ssid) if the interface is WiFi and connected, None otherwise
-fn get_wifi_ssid(interface: &str) -> Option<String> {
-    use nl80211::Socket;
-
-    Socket::connect()
+fn get_wifi_ssid(socket: &mut Socket, interface: &str) -> Option<String> {
+    socket
+        .get_interfaces_info()
         .ok()
-        .and_then(|mut socket| socket.get_interfaces_info().ok())
         .and_then(|interfaces| {
             interfaces.into_iter().find(|iface| {
                 let name = iface
@@ -36,10 +35,7 @@ fn get_wifi_ssid(interface: &str) -> Option<String> {
                 name.map(|name| name == interface).unwrap_or(false)
             })
         })
-        .and_then(|iface| {
-            // Extract SSID if available
-            iface.ssid.and_then(|ssid| String::from_utf8(ssid).ok())
-        })
+        .and_then(|iface| iface.ssid.and_then(|ssid| String::from_utf8(ssid).ok()))
 }
 
 /// Read battery capacity from a given path
@@ -96,7 +92,7 @@ fn get_ac_online_status(path: &str) -> bool {
 }
 
 /// Format IP addresses with WiFi SSID if available
-fn format_ip_addresses(interfaces: &[String]) -> String {
+fn format_ip_addresses(interfaces: &[String], socket: &mut Option<Socket>) -> String {
     let network_interfaces = list_afinet_netifas().unwrap_or_default();
     let mut ip_addresses: Vec<(String, String)> = vec![];
 
@@ -117,8 +113,10 @@ fn format_ip_addresses(interfaces: &[String]) -> String {
     for (i, (interface, address)) in ip_addresses.iter().enumerate() {
         result.push_str(address);
 
-        if let Some(ssid) = get_wifi_ssid(interface) {
-            result.push_str(&format!("[{}]", ssid));
+        if let Some(sock) = socket.as_mut() {
+            if let Some(ssid) = get_wifi_ssid(sock, interface) {
+                result.push_str(&format!("[{}]", ssid));
+            }
         }
 
         if i != ip_addresses.len() - 1 {
@@ -228,6 +226,8 @@ fn main() {
 
     // Thread updating every n seconds
     std::thread::scope(|x| {
+        let mut socket = Socket::connect().ok();
+
         x.spawn(move || {
             loop {
                 // Battery 0
@@ -290,7 +290,7 @@ fn main() {
                 std::thread::sleep(Duration::from_secs(1));
 
                 // IP Address
-                let ip_addresses_string = format_ip_addresses(&args.interface);
+                let ip_addresses_string = format_ip_addresses(&args.interface, &mut socket);
                 while ip_addresses_tx.send(ip_addresses_string.clone()).is_err() {
                     std::thread::sleep(Duration::from_millis(100));
                 }
