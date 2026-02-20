@@ -10,7 +10,7 @@ use chrono::{DateTime, Local};
 use clap::Parser;
 use local_ip_address::list_afinet_netifas;
 use nl80211::Socket;
-use sysinfo::{System, Users, get_current_pid};
+use sysinfo::{ProcessesToUpdate, System, Users, get_current_pid};
 
 const BAT0_PATH: &str = "/sys/class/power_supply/BAT0/capacity";
 const BAT1_PATH: &str = "/sys/class/power_supply/BAT1/capacity";
@@ -175,13 +175,16 @@ fn main() {
     let (ac_online_tx, ac_online_rx) = channel();
     let (mem_tx, mem_rx) = channel();
     let (cpu_tx, cpu_rx) = channel();
-    let m_sys = Arc::new(Mutex::new(System::new_all()));
+    let m_sys = Arc::new(Mutex::new(System::new()));
 
     // First call to sys functions, grabbing host_name and user name, and also ip addresses
     let (sys_host_name, sys_user_name) = {
         let mut sys = m_sys.lock().unwrap_or_else(|e| e.into_inner());
 
-        sys.refresh_all();
+        sys.refresh_processes(
+            ProcessesToUpdate::Some(&[get_current_pid().unwrap()]),
+            false,
+        );
 
         let pid = loop {
             match get_current_pid() {
@@ -229,6 +232,13 @@ fn main() {
         let mut socket = Socket::connect().ok();
 
         x.spawn(move || {
+            // Fetch IP addresses immediately on startup
+            let ip_addresses_string = format_ip_addresses(&args.interface, &mut socket);
+            while ip_addresses_tx.send(ip_addresses_string.clone()).is_err() {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+
+            let mut ip_fetch_counter = 0;
             loop {
                 // Battery 0
                 if battery_00_enable && let Some(bat0) = read_battery_capacity(BAT0_PATH) {
@@ -277,7 +287,7 @@ fn main() {
 
                 // Cpu Usage
                 let mut sys = m_sys.lock().unwrap_or_else(|e| e.into_inner());
-                sys.refresh_cpu_all();
+                sys.refresh_cpu_usage();
                 let new_avg_cpu_usage: f32 =
                     ((sys.cpus().iter().map(|cpu| cpu.cpu_usage()).sum::<f32>())
                         / sys.cpus().len() as f32)
@@ -290,9 +300,13 @@ fn main() {
                 std::thread::sleep(Duration::from_secs(1));
 
                 // IP Address
-                let ip_addresses_string = format_ip_addresses(&args.interface, &mut socket);
-                while ip_addresses_tx.send(ip_addresses_string.clone()).is_err() {
-                    std::thread::sleep(Duration::from_millis(100));
+                ip_fetch_counter += 1;
+                if ip_fetch_counter >= 10 {
+                    ip_fetch_counter = 0;
+                    let ip_addresses_string = format_ip_addresses(&args.interface, &mut socket);
+                    while ip_addresses_tx.send(ip_addresses_string.clone()).is_err() {
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
                 }
             }
         });
